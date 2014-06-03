@@ -6,17 +6,30 @@ FILENAME = 'BrainMets.xlsx'
 MONTHS_TO_LIVE = 9
 N_TRAIN = 250
 
-def make_dataset(df, binarize_categorical):
-	"""
-	Load dataset with continuous outputs
-	"""
+def get_expert_predictions(df):
+	expert_predictions = {}
+	experts = [
+		'Prediction(Cleveland Clinic)', 
+		' Prediction (Lanie Francis)', 
+		'Prediction(Flickinger)', 
+		'Prediction(Loefler', 
+		'Prediction(Knisely)', 
+		'Prediction(Lunsford)', 
+		'Prediction (Tahrini)', 
+		'Prediction (Sheehan)', 
+		'Prediction (Linskey)', 
+		'Prediction(friedman)', 
+		'Prediction(Stupp)', 
+		'Prediction(Rakfal)', 
+		'Prediction(Rush)', 
+		' Prediction( Kondziolka)'
+	]
+	for expert in experts:
+		expert_predictions[expert] = df[expert]
+	return expert_predictions
+
+def extract_features(df, binarize_categorical):
 	df = df.copy()
-	df['cancer type']  = df['cancer type'].str.lower()
-	cancer_types = df['cancer type'].unique()
-	cancer_type_col = np.zeros(len(df['cancer type']), dtype=int)
-	for (i, cancer_type) in enumerate(cancer_types):
-		cancer_type_col[np.array(df['cancer type'] == cancer_type)] = i
-	df['cancer type'] = cancer_type_col
 	df['# of tumors > 1'] = df['# of tumors'] > 1
 	df['age 30s'] = (df['age'] >= 30) & (df['age'] < 40)
 	df['age 40s'] = (df['age'] >= 40) & (df['age'] < 50)
@@ -54,39 +67,43 @@ def make_dataset(df, binarize_categorical):
 		binarizer = sklearn.preprocessing.OneHotEncoder(categorical_features = binarize_mask)
 		X = binarizer.fit_transform(X).todense()
 		print np.sum(X[:, -1])
+	return X
+def make_dataset(df, binarize_categorical):
+	"""
+	Load dataset with continuous outputs
+	"""
+	
+	dead = df['Dead']	
 	Y = np.array(df['SurvivalMonths'])
-	expert_predictions = {}
-	experts = [
-		'Prediction(Cleveland Clinic)', 
-		' Prediction (Lanie Francis)', 
-		'Prediction(Flickinger)', 
-		'Prediction(Loefler', 
-		'Prediction(Knisely)', 
-		'Prediction(Lunsford)', 
-		'Prediction (Tahrini)', 
-		'Prediction (Sheehan)', 
-		'Prediction (Linskey)', 
-		'Prediction(friedman)', 
-		'Prediction(Stupp)', 
-		'Prediction(Rakfal)', 
-		'Prediction(Rush)', 
-		' Prediction( Kondziolka)'
-	]
-	for expert in experts:
-		expert_predictions[expert] = df[expert]
-	dead = df['Dead']
-	return X, Y, dead, expert_predictions
+	expert_predictions = get_expert_predictions(df)
+	test_set_mask = np.zeros(len(df), dtype=bool)
+	# training set is any data point for which we have no expert
+	# predictions 
+	for expert_Y in expert_predictions.values():
+		test_set_mask |= ~expert_Y.isnull()
+
+	X = extract_features(df, binarize_categorical)
+	return X, Y, dead, expert_predictions, test_set_mask
 
 def make_labeled_dataset(df, months_to_live = MONTHS_TO_LIVE, binarize_categorical = True):
-	X, Y_continuous, dead, expert_predictions = make_dataset(df, binarize_categorical)
+	X, Y_continuous, dead, expert_predictions, test_set_mask = make_dataset(df, binarize_categorical)
 	# get rid of patients for whom we don't have a long enough history
 	mask = np.array(dead | (Y_continuous >= months_to_live))
 	X = X[mask]
 	Y = dead[mask] & (Y_continuous[mask] < months_to_live)
 	return X, Y
 
-def load_dataframe(filename = FILENAME):
-	return pd.read_excel(filename, 'DATA', header=1)
+def load_dataframe(filename = FILENAME, cancer_types_to_numbers = True):
+	df = pd.read_excel(filename, 'DATA', header=1)
+	if cancer_types_to_numbers:
+		df['cancer type']  = df['cancer type'].str.lower()
+		cancer_types = df['cancer type'].unique()
+		cancer_type_col = np.zeros(len(df['cancer type']), dtype=int)
+		for (i, cancer_type) in enumerate(cancer_types):
+			cancer_type_col[np.array(df['cancer type'] == cancer_type)] = i
+		df['cancer type'] = cancer_type_col
+	return df 
+
 	
 def load_dataset(filename = FILENAME, binarize_categorical = True):
 	df = load_dataframe(filename)

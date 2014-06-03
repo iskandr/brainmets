@@ -33,24 +33,16 @@ def binary_predictors(start = 3, stop = 20):
 		print "Months to live = %d, n_dead = %d, ROC AUC = %0.4f" % (i, np.sum(Y), auc)
 
 
-if __name__ == '__main__':
+def error(Y_pred, Y_true):
+	return np.mean(np.abs(Y_pred - Y_true))
 
-	X, Y, dead, experts = data.load_dataset(binarize_categorical = True)
-	X = np.array(X)
-
-	def error(Y_pred, Y_true):
-		return np.mean(np.abs(Y_pred - Y_true))
-	
-	print "Data shape", X.shape
-	test_set_mask = np.zeros_like(Y, dtype='bool')
-	
+def average_expert_error(experts, Y):
 	Y_expert_combined = np.zeros_like(Y)
 	Y_expert_count = np.zeros_like(Y, dtype=int)
 
 	for expert in experts:
 		Y_pred = experts[expert]
 		mask = np.array(~(Y_pred.isnull()))
-		test_set_mask |= mask
 		print expert.strip(), "n =", np.sum(mask)
 		Y_pred_subset = np.array(Y_pred[mask].astype('float'))
 		print "-- %0.4f" % error(Y_pred_subset, Y[np.array(mask)])
@@ -60,8 +52,18 @@ if __name__ == '__main__':
 	combined_mask = Y_expert_count > 0
 	Y_expert_combined = Y_expert_combined[combined_mask]
 	Y_expert_combined /= Y_expert_count[combined_mask]
+	return error(Y_expert_combined, Y[combined_mask])
+
+if __name__ == '__main__':
+
+	X, Y, dead, experts, test_set_mask = data.load_dataset(binarize_categorical = True)
+	X = np.array(X)
+
+	
+	print "Data shape", X.shape
+
 	print "---"
-	print "Average prediction error = %0.4f" % error(Y_expert_combined, Y[combined_mask])
+	print "Average prediction error = %0.4f" % average_expert_error(experts, Y)
 	print "---"
 
 	n_test = np.sum(test_set_mask)
@@ -83,7 +85,6 @@ if __name__ == '__main__':
 
 	def fit(model):
 		model.fit(X_train, Y_train)
-
 		pred = model.predict(X_test)
 		e = error(pred, Y_test)
 		print "%s error: %0.4f" % (model.__class__.__name__, e)
