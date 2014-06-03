@@ -74,7 +74,7 @@ def encoding_score(encoded, n, y_train):
 			worst_survival_size = n_mask 
 	return (np.abs(best_survival - worst_survival) * (best_survival_size + worst_survival_size)) / total 
 
-def best_cutoff_encoding(df, field_name, y, train_mask):
+def best_binning_encoding(df, field_name, y, train_mask):
 	x = df[field_name]
 	x = np.array(x).squeeze()
 	y = np.array(y).squeeze()
@@ -99,6 +99,32 @@ def best_cutoff_encoding(df, field_name, y, train_mask):
 	print "Best thresholds for %s = %s" % (field_name, best_cutoff)
 	return best_encoded
 
+
+def best_single_threshold_encoding(df, field_name, y, train_mask):
+	x = df[field_name]
+	x = np.array(x).squeeze()
+	y = np.array(y).squeeze()
+	x_train = x[train_mask]
+	y_train = y[train_mask]
+
+	best_score = np.inf 
+	best_cutoff = None 
+	best_encoded = None 
+ 
+	for threshold in list(sorted(np.unique(x_train)))[:-1]:
+		right_mask = x_train > threshold
+		left_mask = ~right_mask 
+		n_right = right_mask.sum()
+		n_left = left_mask.sum()
+		score = np.var(y_train[right_mask]) * n_right + np.var(left_mask) * n_left 
+	
+		if score < best_score:
+			best_cutoff = threshold 
+			best_score = score 
+			best_encoded = x > threshold
+	print "Best threshold for %s = %s" % (field_name, best_cutoff)
+	return best_encoded
+
 def feature_selection(df, Y, training_set_mask):
 	Y_training = Y[training_set_mask]
 	df_training = df.ix[training_set_mask]
@@ -109,6 +135,7 @@ def feature_selection(df, Y, training_set_mask):
 	
 def extract_features(df, binarize_categorical, greedy_feature_binning, Y = None, test_set_mask = None):
 	
+		
 	if greedy_feature_binning:
 		training_set_mask = ~test_set_mask
 		features = []
@@ -116,57 +143,62 @@ def extract_features(df, binarize_categorical, greedy_feature_binning, Y = None,
 		continuous_fields = [ 
 			'# of tumors', 
 			'age',
-			'ECOG', 
+			
 		]
 		categorical_fields = [
+			'ECOG', 
+		
 			'RPA', 	
+			'Brain Tumor Sx', 
+		
 			'cancer type', 
 			'Prior WBRT', 
-			'Brain Tumor Sx', 
 			'Diagnosis of Primary at the same time as Brain tumor'
 		]
 		for field_name in continuous_fields:
-			x = best_cutoff_encoding(df, field_name, Y, training_set_mask)
-			features.append(x)
+			x = best_single_threshold_encoding(df, field_name, Y, training_set_mask)
+			features.append(np.array(x).astype('float'))
 		for field_name in categorical_fields:
-			features.append(df[field_name])
+			features.append(np.array(df[field_name]).astype('float'))
+
+		continuous_feature_indices = [0,1,2]
 		X = np.array(features).T
+
 	else:
 		df = df.copy()
 
 		df['# of tumors > 1'] = df['# of tumors'] > 1
-		df['age 30s'] = (df['age'] >= 30) & (df['age'] < 40)
-		df['age 40s'] = (df['age'] >= 40) & (df['age'] < 50)
-		df['age 50s'] = (df['age'] >= 50) & (df['age'] < 60)
-		df['age 60s'] = (df['age'] >= 60) & (df['age'] < 70)
-		df['age 70s'] = (df['age'] >= 70) & (df['age'] < 80)
-		df['age 80s'] = df['age'] >= 80
-
+		df['age <40'] =  df['age'] < 40
+		df['age 40-55'] = (df['age'] >= 40) & (df['age'] < 55)
+		df['age 55-65'] = (df['age'] >= 55) & (df['age'] < 65)
+		df['age 65-75'] = (df['age'] >= 65) & (df['age'] < 75)
+		
+		df['age >=75'] = (df['age'] >= 75) 
 		fields = [ 
 			'# of tumors > 1', 
-			'age 30s',
-			'age 40s',
-			'age 50s',
-			'age 60s',
-			'age 70s',
-			'age 80s',
-			'cancer type', 
-			'ECOG', 
-			'Prior WBRT', 
+			'age <40',
+			'age 40-55',
+			'age 55-65',
+			'age 65-75',
+			'age >=75',
+
 			'Brain Tumor Sx', 
 			'RPA', 
+			'ECOG', 
+			'cancer type', 
+			'Prior WBRT', 
 			'Diagnosis of Primary at the same time as Brain tumor'
 		]
+		continuous_feature_indices = range(6)
+		
 
 		X_raw = df[fields]
-		X = np.array(X_raw).astype('int')
+		X = np.array(X_raw).astype('float')
 	if binarize_categorical:
 		n_features = X.shape[1]
 		binarize_mask = np.ones(n_features, dtype=bool)
-		# age 
-		binarize_mask[0:7] = False
-		# number of tumors 
-		#binarize_mask[7] = False
+		
+		binarize_mask[continuous_feature_indices] = False
 		
 		binarizer = sklearn.preprocessing.OneHotEncoder(categorical_features = binarize_mask)
 		X = np.array(binarizer.fit_transform(X).todense())
@@ -210,6 +242,7 @@ def load_dataframe(filename = FILENAME, cancer_types_to_numbers = True):
 		for (i, cancer_type) in enumerate(cancer_types):
 			cancer_type_col[np.array(df['cancer type'] == cancer_type)] = i
 		df['cancer type'] = cancer_type_col
+	df['Brain Tumor Sx'] = df['Brain Tumor Sx'].astype('float')
 	return df 
 
 	

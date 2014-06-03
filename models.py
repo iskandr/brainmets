@@ -56,7 +56,7 @@ def average_expert_error(experts, Y):
 
 if __name__ == '__main__':
 
-	X, Y, dead, experts, test_set_mask = data.load_dataset(binarize_categorical = True, greedy_feature_binning = False)
+	X, Y, dead, experts, test_set_mask = data.load_dataset(binarize_categorical = True, greedy_feature_binning = True)
 	X = np.array(X)
 
 	
