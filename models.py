@@ -37,6 +37,9 @@ if __name__ == '__main__':
 
 	X, Y, dead, experts = data.load_dataset(binarize_categorical = True)
 	X = np.array(X)
+
+	def error(Y_pred, Y_true):
+		return np.mean(np.abs(Y_pred - Y_true))
 	
 	print "Data shape", X.shape
 	test_set_mask = np.zeros_like(Y, dtype='bool')
@@ -49,11 +52,8 @@ if __name__ == '__main__':
 		mask = np.array(~(Y_pred.isnull()))
 		test_set_mask |= mask
 		print expert.strip(), "n =", np.sum(mask)
-		# X_subset = X[mask]
 		Y_pred_subset = np.array(Y_pred[mask].astype('float'))
-		diff = Y[np.array(mask)] -  Y_pred_subset
-		error = np.mean(np.abs(diff))
-		print "-- %0.4f" % error
+		print "-- %0.4f" % error(Y_pred_subset, Y[np.array(mask)])
 		Y_expert_combined[mask] += Y_pred_subset
 		Y_expert_count[mask] += 1
 
@@ -61,7 +61,7 @@ if __name__ == '__main__':
 	Y_expert_combined = Y_expert_combined[combined_mask]
 	Y_expert_combined /= Y_expert_count[combined_mask]
 	print "---"
-	print "Average prediction error = %0.4f" % (np.mean(np.abs(Y_expert_combined - Y[combined_mask])))
+	print "Average prediction error = %0.4f" % error(Y_expert_combined, Y[combined_mask])
 	print "---"
 
 	n_test = np.sum(test_set_mask)
@@ -83,8 +83,10 @@ if __name__ == '__main__':
 
 	def fit(model):
 		model.fit(X_train, Y_train)
+
 		pred = model.predict(X_test)
-		print "%s error: %0.4f" % (model.__class__.__name__, np.mean(np.abs(pred - Y_test)))
+		e = error(pred, Y_test)
+		print "%s error: %0.4f" % (model.__class__.__name__, e)
 
 	fit(sklearn.linear_model.LinearRegression())
 	fit(sklearn.svm.SVR())
