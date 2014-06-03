@@ -56,7 +56,7 @@ def average_expert_error(experts, Y):
 
 if __name__ == '__main__':
 
-	X, Y, dead, experts, test_set_mask = data.load_dataset(binarize_categorical = True)
+	X, Y, dead, experts, test_set_mask = data.load_dataset(binarize_categorical = True, greedy_feature_binning = False)
 	X = np.array(X)
 
 	
@@ -76,12 +76,10 @@ if __name__ == '__main__':
 	X_test = X[test_set_mask]
 	Y_test = Y[test_set_mask]
 
-
 	pca = sklearn.decomposition.PCA(10)
 	X_train = pca.fit_transform(X_train)
 	print "PCA transformed shape", X_train.shape
 	X_test = pca.transform(X_test)
-
 
 	def fit(model):
 		model.fit(X_train, Y_train)
