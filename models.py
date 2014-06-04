@@ -33,65 +33,99 @@ def binary_predictors(start = 3, stop = 20):
 		print "Months to live = %d, n_dead = %d, ROC AUC = %0.4f" % (i, np.sum(Y), auc)
 
 
-def error(Y_pred, Y_true):
+def error(Y_true, Y_pred):
 	return np.mean(np.abs(Y_pred - Y_true))
 
-def average_expert_error(experts, Y):
+def average_expert_error(experts, Y, dead = None):
+	if dead is not None:
+		Y = Y[dead]
 	Y_expert_combined = np.zeros_like(Y)
 	Y_expert_count = np.zeros_like(Y, dtype=int)
 
 	for expert in experts:
 		Y_pred = experts[expert]
+		if dead is not None:
+			Y_pred = Y_pred[dead]
 		mask = np.array(~(Y_pred.isnull()))
 		print expert.strip(), "n =", np.sum(mask)
 		Y_pred_subset = np.array(Y_pred[mask].astype('float'))
-		print "-- %0.4f" % error(Y_pred_subset, Y[np.array(mask)])
+		print "-- %0.4f" % error(Y[np.array(mask)], Y_pred_subset)
 		Y_expert_combined[mask] += Y_pred_subset
 		Y_expert_count[mask] += 1
 
 	combined_mask = Y_expert_count > 0
 	Y_expert_combined = Y_expert_combined[combined_mask]
 	Y_expert_combined /= Y_expert_count[combined_mask]
-	return error(Y_expert_combined, Y[combined_mask])
+	return error(Y[combined_mask], Y_expert_combined)
 
 if __name__ == '__main__':
 
-	X, Y, dead, experts, test_set_mask = data.load_dataset(binarize_categorical = True, greedy_feature_binning = True)
+	X, Y, dead, experts, test_set_mask = data.load_dataset(binarize_categorical = True)
 	X = np.array(X)
+	Y = np.array(Y)
 
-	
+
 	print "Data shape", X.shape
 
 	print "---"
-	print "Average prediction error = %0.4f" % average_expert_error(experts, Y)
+	print "Average prediction error = %0.4f" % average_expert_error(experts, Y, dead)
 	print "---"
 
-	n_test = np.sum(test_set_mask)
-	n_train = len(Y) - n_test
-	print "Training set = %d, test set = %d" % (n_train, n_test)
 
-	X_train = X[~test_set_mask]
-	Y_train = Y[~test_set_mask]
-
-	X_test = X[test_set_mask]
-	Y_test = Y[test_set_mask]
-
+	X_dead = X[dead]
+	Y_dead = Y[dead]
+	train_mask = ~test_set_mask
+	
+	X_train = X[dead & train_mask]
+	Y_train = Y[dead & train_mask]
+	
+	X_test = X[dead & test_set_mask]
+	Y_test = Y[dead & test_set_mask]
+	n_test = len(Y_test)
+	n_train = len(Y_train) 
+	print "Training set = %d, test set = %d, n_features = %d" % (n_train, n_test, X_test.shape[1])
+	
 	pca = sklearn.decomposition.PCA(10)
-	X_train = pca.fit_transform(X_train)
-	print "PCA transformed shape", X_train.shape
+	pca.fit_transform(X[train_mask])
+	X_train = pca.transform(X_train)
 	X_test = pca.transform(X_test)
-
+	
 	def fit(model):
 		model.fit(X_train, Y_train)
-		pred = model.predict(X_test)
-		e = error(pred, Y_test)
-		print "%s error: %0.4f" % (model.__class__.__name__, e)
+		pred_train = model.predict(X_train)
+		pred_test = model.predict(X_test)
+		train_error = error(Y_train, pred_train)
+		test_error = error(Y_test, pred_test)
+		def cv_scorer(model, x, y):
+			pred = model.predict(x)
+			return error(y, pred)
 
+		cv_scores = sklearn.cross_validation.cross_val_score(model, X_train, Y_train, cv=10, scoring = cv_scorer)
+		cv_error = np.mean(cv_scores) 
+		print "%s" % (model.__class__.__name__)
+		print "-- training error: %0.4f" % train_error
+		print "-- CV error: %0.4f" % cv_error
+		print "-- test error %0.4f" % test_error
+
+	class AlwaysAverage(object):
+
+		def __init__(self, average = None):
+			self.average = average 
+
+		def get_params(self, deep = False):
+			return {'average' : self.average}
+
+		def fit(self, X_train, Y_train):
+			self.average =  np.mean(Y_train)
+		def predict(self, _):
+			return self.average 
+
+	fit(AlwaysAverage())	
 	fit(sklearn.linear_model.LinearRegression())
 	fit(sklearn.svm.SVR())
 	fit(sklearn.linear_model.RidgeCV(alphas = [0.001, 0.01, 0.1, 1, 10, 100, 1000]))
 	fit(sklearn.linear_model.LassoCV())
 	fit(sklearn.linear_model.OrthogonalMatchingPursuitCV())
-	fit(sklearn.ensemble.RandomForestRegressor(n_estimators = 500))
+	fit(sklearn.ensemble.RandomForestRegressor(n_estimators = 1000))
 
 

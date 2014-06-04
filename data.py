@@ -28,102 +28,6 @@ def get_expert_predictions(df):
 		expert_predictions[expert] = df[expert]
 	return expert_predictions
 
-def cutoff_tuples_recursive(values, cutoffs, n_cutoffs):
-	
-	if n_cutoffs < 1 or len(values) == 0:
-		return [cutoffs]
-	results = []
-	for v in values:
-		remaining_values = [v2 for v2 in values if v2 > v]
-		results.extend(cutoff_tuples_recursive(remaining_values, cutoffs + (v,), n_cutoffs - 1))
-	return results
-
-def cutoff_tuples(values):
-	values = list(sorted(np.unique(values)))
-	if len(values) == 2:
-		return (values[0],)
-	if len(values) > 10:
-		_, values = np.histogram(values)
-		values = values[1:]
-	# drop the maximum value, since we're looking for features greater than this value
-	values = values[:-1]
-	results = []
-	for i in xrange(1, min(len(values)+1, 4)):
-
-		results.extend(cutoff_tuples_recursive(values, (), i+1))
-	return results 
-
-def encoding_score(encoded, n, y_train):
-	group_scores = []
-	total = float(len(y_train))
-
-	best_survival = 0 
-	best_survival_size = 0
-	worst_survival = np.inf
-	worst_survival_size = 0  
-	for i in xrange(n):	
-		mask = (encoded == i)
-		n_mask = mask.sum()
-		y_train_subset = y_train[mask]
-		average = np.mean(y_train_subset)
-		if average > best_survival:
-			best_survival = average
-			best_survival_size = n_mask 
-		if average < worst_survival:
-			worst_survival = average 
-			worst_survival_size = n_mask 
-	return (np.abs(best_survival - worst_survival) * (best_survival_size + worst_survival_size)) / total 
-
-def best_binning_encoding(df, field_name, y, train_mask):
-	x = df[field_name]
-	x = np.array(x).squeeze()
-	y = np.array(y).squeeze()
-	x_train = x[train_mask]
-	y_train = y[train_mask]
-
-	cutoffs = cutoff_tuples(x_train)
-	best_score = 0
-	best_cutoff = None 
-	best_encoded = None 
- 
-	for cutoff in cutoffs:
-		n = len(cutoff)
-		encoded = np.searchsorted(cutoff, x, side = 'right')
-		encoded_train = encoded[train_mask]
-		score = encoding_score(encoded_train, n, y_train)
-	
-		if score > best_score:
-			best_cutoff = cutoff 
-			best_score = score 
-			best_encoded = encoded
-	print "Best thresholds for %s = %s" % (field_name, best_cutoff)
-	return best_encoded
-
-
-def best_single_threshold_encoding(df, field_name, y, train_mask):
-	x = df[field_name]
-	x = np.array(x).squeeze()
-	y = np.array(y).squeeze()
-	x_train = x[train_mask]
-	y_train = y[train_mask]
-
-	best_score = np.inf 
-	best_cutoff = None 
-	best_encoded = None 
- 
-	for threshold in list(sorted(np.unique(x_train)))[:-1]:
-		right_mask = x_train > threshold
-		left_mask = ~right_mask 
-		n_right = right_mask.sum()
-		n_left = left_mask.sum()
-		score = np.var(y_train[right_mask]) * n_right + np.var(left_mask) * n_left 
-	
-		if score < best_score:
-			best_cutoff = threshold 
-			best_score = score 
-			best_encoded = x > threshold
-	print "Best threshold for %s = %s" % (field_name, best_cutoff)
-	return best_encoded
 
 def feature_selection(df, Y, training_set_mask):
 	Y_training = Y[training_set_mask]
@@ -133,84 +37,54 @@ def feature_selection(df, Y, training_set_mask):
 	n_tumors_training = n_tumors[training_set_mask]
 
 	
-def extract_features(df, binarize_categorical, greedy_feature_binning, Y = None, test_set_mask = None):
+def extract_features(df, binarize_categorical):
 	
-		
-	if greedy_feature_binning:
-		training_set_mask = ~test_set_mask
-		features = []
+	df = df.copy()
+	df['# of tumors > 1'] = df['# of tumors'] > 1
+	df['age <45'] =  df['age'] < 45
+	df['age 45-55'] = (df['age'] >= 45) & (df['age'] < 55)
+	df['age 55-65'] = (df['age'] >= 55) & (df['age'] < 65)
+	df['age 65-75'] = (df['age'] >= 65) & (df['age'] < 75)
+	
+	df['age >=75'] = (df['age'] >= 75) 
+	continuous_fields = [
+		'# of tumors > 1', 
+		'age <45',
+		'age 45-55',
+		'age 55-65',
+		'age 65-75',
+		'age >=75',
+	]
+	categorical_fields = [
+		'Brain Tumor Sx', 
+		'RPA', 
+		'ECOG', 
+		'cancer type', 
+		'Prior WBRT', 
+		'Diagnosis of Primary at the same time as Brain tumor'
+	
+	]
+	fields = continuous_fields + categorical_fields
+	vectors = []
+	for field in fields: 
+		vectors.append(np.array(df[field]).astype('float'))
 
-		continuous_fields = [ 
-			'# of tumors', 
-			'age',
-			
-		]
-		categorical_fields = [
-			'ECOG', 
-		
-			'RPA', 	
-			'Brain Tumor Sx', 
-		
-			'cancer type', 
-			'Prior WBRT', 
-			'Diagnosis of Primary at the same time as Brain tumor'
-		]
-		for field_name in continuous_fields:
-			x = best_single_threshold_encoding(df, field_name, Y, training_set_mask)
-			features.append(np.array(x).astype('float'))
-		for field_name in categorical_fields:
-			features.append(np.array(df[field_name]).astype('float'))
+	X = np.array(vectors).T
 
-		continuous_feature_indices = [0,1,2]
-		X = np.array(features).T
-
-	else:
-		df = df.copy()
-
-		df['# of tumors > 1'] = df['# of tumors'] > 1
-		df['age <40'] =  df['age'] < 40
-		df['age 40-55'] = (df['age'] >= 40) & (df['age'] < 55)
-		df['age 55-65'] = (df['age'] >= 55) & (df['age'] < 65)
-		df['age 65-75'] = (df['age'] >= 65) & (df['age'] < 75)
-		
-		df['age >=75'] = (df['age'] >= 75) 
-		fields = [ 
-			'# of tumors > 1', 
-			'age <40',
-			'age 40-55',
-			'age 55-65',
-			'age 65-75',
-			'age >=75',
-
-			'Brain Tumor Sx', 
-			'RPA', 
-			'ECOG', 
-			'cancer type', 
-			'Prior WBRT', 
-			'Diagnosis of Primary at the same time as Brain tumor'
-		]
-		continuous_feature_indices = range(6)
-		
-
-		X_raw = df[fields]
-		X = np.array(X_raw).astype('float')
 	if binarize_categorical:
 		n_features = X.shape[1]
 		binarize_mask = np.ones(n_features, dtype=bool)
-		
-		binarize_mask[continuous_feature_indices] = False
-		
+		binarize_mask[len(continuous_fields)] = False
 		binarizer = sklearn.preprocessing.OneHotEncoder(categorical_features = binarize_mask)
 		X = np.array(binarizer.fit_transform(X).todense())
-	
 	return X
 
-def make_dataset(df, binarize_categorical, greedy_feature_binning):
+def make_dataset(df, binarize_categorical):
 	"""
 	Load dataset with continuous outputs
 	"""
 	
-	dead = df['Dead']	
+	dead = np.array(df['Dead'] == 1)
 	Y = np.array(np.array(df['SurvivalMonths']))
 
 	expert_predictions = get_expert_predictions(df)
@@ -221,12 +95,12 @@ def make_dataset(df, binarize_categorical, greedy_feature_binning):
 		test_set_mask |= ~expert_Y.isnull()
 
 	
-	X = extract_features(df, binarize_categorical, greedy_feature_binning, Y, test_set_mask)
+	X = extract_features(df, binarize_categorical)
 	
 	return X, Y, dead, expert_predictions, test_set_mask
 
-def make_labeled_dataset(df, months_to_live = MONTHS_TO_LIVE, binarize_categorical = True, greedy_feature_binning = True):
-	X, Y_continuous, dead, expert_predictions, test_set_mask = make_dataset(df, binarize_categorical, greedy_feature_binning)
+def make_labeled_dataset(df, months_to_live = MONTHS_TO_LIVE, binarize_categorical = True):
+	X, Y_continuous, dead, expert_predictions, test_set_mask = make_dataset(df, binarize_categorical)
 	# get rid of patients for whom we don't have a long enough history
 	mask = np.array(dead | (Y_continuous >= months_to_live))
 	X = X[mask]
@@ -246,9 +120,9 @@ def load_dataframe(filename = FILENAME, cancer_types_to_numbers = True):
 	return df 
 
 	
-def load_dataset(filename = FILENAME, binarize_categorical = True, greedy_feature_binning = False):
+def load_dataset(filename = FILENAME, binarize_categorical = True):
 	df = load_dataframe(filename)
-	return make_dataset(df, binarize_categorical = binarize_categorical, greedy_feature_binning = greedy_feature_binning)
+	return make_dataset(df, binarize_categorical = binarize_categorical)
 
 def load_labeled_dataset(filename = FILENAME, months_to_live = MONTHS_TO_LIVE, binarize_categorical = True):
 	df = load_dataframe(filename)
@@ -280,4 +154,4 @@ def load_dataset_splits(filename = FILENAME, months_to_live = MONTHS_TO_LIVE, n_
 	df = load_dataframe(filename)
 	return split_dataset(df, months_to_live, n_train)
 
-	
+
