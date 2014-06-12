@@ -107,16 +107,18 @@ def extract_features(df, binarize_categorical):
 	df['age <40'] =  df['age'] < 40
 	df['age 40-50'] = (df['age'] >= 40) & (df['age'] < 50)
 	df['age 50-60'] = (df['age'] >= 50) & (df['age'] < 60)
+	df['age 50-70'] = (df['age'] >= 50) & (df['age'] < 70)
 	df['age 60-70'] = (df['age'] >= 60) & (df['age'] < 70)
 	df['age 70-80'] = (df['age'] >= 70) & (df['age'] < 80)
 	df['age >=80'] = (df['age'] >= 80) 
 	df['age >=70'] =df['age'] >= 70
 	df['age 45-60'] = (df['age'] >= 45) & (df['age'] < 60)
+	df['Normalized K Score'] = df['K Score'] / 100.0
 	continuous_fields = [
 		'# of tumors > 1',
+		'age 50-70', 
 		'age >=70',
-		'log_age', 
-		'K Score',
+		'Normalized K Score',
 	]
 	binary_fields = [
 		'Prior WBRT', 
@@ -126,7 +128,7 @@ def extract_features(df, binarize_categorical):
 	categorical_fields = [
 		'Extracranial Disease Status',
 		'cancer type', 
-		# 'Brain Tumor Sx', 
+	    'Brain Tumor Sx', 
 		'RPA', 
 		'ECOG', 
 	]

@@ -1,4 +1,5 @@
-import data 
+import math 
+
 import numpy as np 
 import sklearn.linear_model
 import sklearn.naive_bayes 
@@ -7,6 +8,8 @@ import sklearn.ensemble
 import sklearn.decomposition
 import sklearn.naive_bayes
 import sklearn.feature_selection
+
+import data 
                 
 def load_datasets(months_to_live_start = 1, months_to_live_stop = 15, binarize_categorical = True):
 	Xs = {}
@@ -34,30 +37,29 @@ def binary_predictors(start = 3, stop = 20):
 		print "Months to live = %d, n_deceased = %d, ROC AUC = %0.4f" % (i, np.sum(Y), auc)
 
 
-def error(Y_true, Y_pred):
-	return np.mean(np.abs(Y_pred - Y_true))
+def error(Y_true, Y_pred, dead):
+	diff = Y_true - Y_pred 
+	mask = dead | (Y_true >= Y_pred)
+	return np.mean(np.abs(diff[mask]))
 
-def average_expert_error(experts, Y, deceased = None):
-	if deceased is not None:
-		Y = Y[deceased]
+def average_expert_error(Y, experts, deceased):
 	Y_expert_combined = np.zeros_like(Y)
 	Y_expert_count = np.zeros_like(Y, dtype=int)
 
 	for expert in experts:
 		Y_pred = experts[expert]
-		if deceased is not None:
-			Y_pred = Y_pred[deceased]
 		mask = np.array(~(Y_pred.isnull()))
 		print expert.strip(), "n =", np.sum(mask)
 		Y_pred_subset = np.array(Y_pred[mask].astype('float'))
-		print "-- %0.4f" % error(Y[np.array(mask)], Y_pred_subset)
+		print "-- %0.4f" % error(Y[mask], Y_pred_subset, deceased[mask])
 		Y_expert_combined[mask] += Y_pred_subset
 		Y_expert_count[mask] += 1
 
 	combined_mask = Y_expert_count > 0
 	Y_expert_combined = Y_expert_combined[combined_mask]
 	Y_expert_combined /= Y_expert_count[combined_mask]
-	return error(Y[combined_mask], Y_expert_combined)
+	return error(Y[combined_mask], Y_expert_combined, deceased[combined_mask])
+
 
 if __name__ == '__main__':
 
@@ -68,7 +70,7 @@ if __name__ == '__main__':
 	print "Data shape", X.shape
 
 	print "---"
-	print "Average prediction error = %0.4f" % average_expert_error(experts, Y, deceased)
+	print "Average prediction error = %0.4f" % average_expert_error(Y, experts, deceased)
 	print "---"
 
 	
@@ -95,14 +97,15 @@ if __name__ == '__main__':
 
 	# drop features which are always the same value for 
 	# deceased patients in the training set 
-	drop_all_same_features = True 
+	drop_all_same_features = False 
 	if drop_all_same_features:
 		all_same_mask = np.std(X_train_full[train_deceased], axis=0) == 0
 		print "Dropping features", list(np.where(all_same_mask))
 		X_train_full = X_train_full[:, ~all_same_mask]
-		X_test = X_test_full[:, ~all_same_mask]
+		X_test_full = X_test_full[:, ~all_same_mask]
 
-	feature_elimination = True 
+
+	feature_elimination = False 
 	if feature_elimination:
 		selected = np.zeros(X_train_full.shape[1], dtype=int)
 		for i in xrange(1, 10):
@@ -124,7 +127,7 @@ if __name__ == '__main__':
 		seen_set.add(v)
 	print "# of duplicate training samples: %d" % n_seen
 
-	deceased_only = True 
+	deceased_only = False 
 	if deceased_only:
 		X_train = X_train_full[train_deceased]
 		Y_train = Y_train_full[train_deceased]
@@ -151,19 +154,38 @@ if __name__ == '__main__':
 		X_test = pca.transform(X_test)
 		print "Training size after PCA: %s" % (X_train.shape,)
 		
-	def fit(model):
-		model.fit(X_train, Y_train)
-		train_error = error(Y_train,  model.predict(X_train))
-		test_error = error(Y_test, model.predict(X_test))
+	def fit(model, censored = False):
+		if censored:
+			model.fit(X_train, Y_train, train_deceased)
+		else:
+			model.fit(X_train, Y_train)
+		train_error = error(Y_train,  model.predict(X_train), train_deceased)
+		test_error = error(Y_test, model.predict(X_test), test_deceased)
 		
-		def cv_scorer(model, x, y):
-			pred = model.predict(x)
-			return error(y, pred)
-
-
-		cv_scores = sklearn.cross_validation.cross_val_score(model, X_train, Y_train, cv=5, scoring = cv_scorer)
-		cv_error = np.mean(cv_scores) 
-		print "%s" % (model.__class__.__name__)
+		cv_error = 0 
+		indices = np.arange(len(Y_train))
+	 	np.random.shuffle(indices)
+	 	indices = list(indices)
+	 	n_folds = 5
+	 	fold_size = int(math.ceil(len(Y_train) / float(n_folds)))
+	 	for i in xrange(n_folds):
+	 		cv_training_indices = indices[:(i-1)*fold_size] + indices[(i+1)*fold_size:]
+	 		cv_testing_indices = indices[i*fold_size : (i+1)*fold_size]
+	 		X_cv_train = X_train[cv_training_indices]
+	 		Y_cv_train = Y_train[cv_training_indices]
+	 		X_cv_test = X_train[cv_testing_indices]
+	 		Y_cv_test = Y_train[cv_testing_indices]
+	 		deceased_cv_train = deceased[cv_training_indices]
+	 		deceased_cv_test = deceased[cv_testing_indices]
+	 		if censored:
+	 			model.fit(X_cv_train, Y_cv_train, deceased_cv_train)
+	 		else:
+	 			model.fit(X_cv_train, Y_cv_train)
+	 		cv_pred = model.predict(X_cv_test)
+	 		cv_actual = Y_train[cv_testing_indices]
+	 		cv_error += error(cv_actual, cv_pred, deceased_cv_test)
+	 	cv_error /= n_folds 
+	 	print "%s" % (model.__class__.__name__)
 		print "-- training error: %0.4f" % train_error
 		print "-- CV error: %0.4f" % cv_error
 		print "-- test error %0.4f" % test_error
@@ -178,16 +200,61 @@ if __name__ == '__main__':
 
 		def fit(self, X_train, Y_train):
 			self.average =  np.mean(Y_train)
+
 		def predict(self, _):
 			return self.average 
 
+	class CensoredRegression(object):
+		def __init__(self, n_epochs = 5000, learning_rate =  0.005, decay_rate = 0):
+			self.n_epochs = n_epochs
+			self.learning_rate = learning_rate
+			self.decay_rate = decay_rate
+
+		def get_params(self, deep = False):
+			return {
+				'w' : self.w, 
+				'n_epochs' : self.n_epochs, 
+				'learning_rate' : self.learning_rate, 
+				'decay_rate': self.decay_rate
+			}
+
+		def fit(self, X_train, Y_train, deceased):
+			n_samples, n_features = X_train.shape
+			assert len(Y_train) == n_samples
+
+			w = np.linalg.lstsq(X_train[deceased], Y_train[deceased])[0]
+			for epoch in xrange(self.n_epochs):
+				eta = self.learning_rate / np.sqrt(epoch + 1)
+				decay = self.decay_rate  / np.sqrt(epoch + 1)
+				retain = 1.0 - decay 
+				pred = np.dot(X_train, w) 
+				mask = deceased | (pred > Y_train)
+				diff = pred - Y_train
+				mae = np.mean(np.abs(diff[mask]))
+				gradient = np.zeros(n_features, dtype=float)
+				for i in xrange(n_samples):
+					if mask[i]:
+						gradient += X_train[i] * diff[i]
+				gradient /= np.sum(mask)
+				
+				w -= eta * gradient 
+				assert mae < 10**6
+			self.w = w 
+
+		def predict(self, X_test):
+			return np.dot(X_test, self.w)
+
 	fit(AlwaysAverage())	
+	fit(CensoredRegression(), censored = True)
+
 	fit(sklearn.svm.SVR())
 	fit(sklearn.linear_model.RidgeCV(alphas = [0.001, 0.01, 0.1, 1, 10, 100, 1000]))
 	fit(sklearn.linear_model.LassoCV())
 	fit(sklearn.linear_model.OrthogonalMatchingPursuitCV())
 	fit(sklearn.ensemble.RandomForestRegressor(n_estimators = 200, max_features = 'sqrt'))
 	fit(sklearn.ensemble.ExtraTreesRegressor(n_estimators = 200, max_features = 'sqrt'))
+	
+
 
 	for n in xrange(1, 20):
 
@@ -211,8 +278,6 @@ if __name__ == '__main__':
 		svm1 = sklearn.svm.SVC(probability = True, kernel = 'linear', C = 1)
 		svm1.fit(x_train, y_train)
 		svm_pred = svm1.predict(x_test)
-
-		
 
 		svm2 = sklearn.svm.SVC(probability = True, kernel = 'linear', C = 10)
 		svm2.fit(x_train, y_train)
